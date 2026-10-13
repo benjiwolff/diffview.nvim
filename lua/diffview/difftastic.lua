@@ -149,8 +149,12 @@ function M.attach(layout)
       if i ~= main_index then
         local dir = vim.fn.tempname()
         vim.fn.mkdir(dir, "p")
-        local name = vim.fn.fnamemodify(win.path, ":t")
-        local lhs, rhs = dir .. "/old-" .. name, dir .. "/new-" .. name
+        -- Some languages are detected by exact basename (e.g. CMakeLists.txt).
+        -- Separate directories distinguish revisions without changing filenames.
+        vim.fn.mkdir(dir .. "/old", "p")
+        vim.fn.mkdir(dir .. "/new", "p")
+        local lhs = dir .. "/old/" .. vim.fn.fnamemodify(win.path, ":t")
+        local rhs = dir .. "/new/" .. vim.fn.fnamemodify(state.windows[main_index].path, ":t")
         vim.fn.writefile(contents[i], lhs)
         vim.fn.writefile(contents[main_index], rhs)
         local output = {}
