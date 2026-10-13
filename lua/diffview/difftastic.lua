@@ -6,23 +6,24 @@ local api = vim.api
 -- would also inherit the window's native-inline suppression.
 function M.token_highlight(winid)
   local group = "DiffviewDifftasticToken" .. winid
-  api.nvim_win_call(winid, function()
-    local winhl = vim.wo.winhl
-    vim.wo.winhl = ""
-    vim.cmd("redraw")
-    local ok, colors = pcall(function()
-      if api.nvim_get_hl then
-        return api.nvim_get_hl(0, { name = "DiffviewDiffText", link = false })
-      end
-      local value = api.nvim_get_hl_by_name("DiffviewDiffText", true)
-      value.fg, value.bg, value.sp = value.foreground, value.background, value.special
-      value.foreground, value.background, value.special = nil, nil, nil
-      return value
-    end)
-    vim.wo.winhl = winhl
-    assert(ok, colors)
-    api.nvim_set_hl(0, group, colors)
+  -- Resolve colors in an unmapped temporary window. Redrawing the diff window
+  -- with winhl cleared would briefly reveal native inline highlights.
+  local scratch = api.nvim_open_win(api.nvim_win_get_buf(winid), false, {
+    relative = "editor", row = 1, col = 1, width = 1, height = 2, noautocmd = true,
+  })
+  vim.wo[scratch].winhl = ""
+  local ok, colors = pcall(api.nvim_win_call, scratch, function()
+    if api.nvim_get_hl then
+      return api.nvim_get_hl(0, { name = "DiffviewDiffText", link = false })
+    end
+    local value = api.nvim_get_hl_by_name("DiffviewDiffText", true)
+    value.fg, value.bg, value.sp = value.foreground, value.background, value.special
+    value.foreground, value.background, value.special = nil, nil, nil
+    return value
   end)
+  api.nvim_win_close(scratch, true)
+  assert(ok, colors)
+  api.nvim_set_hl(0, group, colors)
   return group
 end
 
@@ -107,6 +108,19 @@ function M.attach(layout)
       original = vim.wo[win.id].winhl,
     }
   end
+  -- Suppress native words before starting the asynchronous comparison, and keep
+  -- that suppression throughout refreshes.
+  for _, target in ipairs(state.windows) do
+    target.token_group = M.token_highlight(target.id)
+    local mappings = {}
+    local line_hl = target.original:match("DiffChange:([^,]+)") or "DiffChange"
+    for mapping in target.original:gmatch("[^,]+") do
+      if not mapping:match("^DiffText:") then mappings[#mappings + 1] = mapping end
+    end
+    mappings[#mappings + 1] = "DiffText:" .. line_hl
+    target.applied = table.concat(mappings, ",")
+    vim.wo[target.id].winhl = target.applied
+  end
   local function refresh()
     state.generation = state.generation + 1
     local generation = state.generation
@@ -117,10 +131,6 @@ function M.attach(layout)
       if not api.nvim_buf_is_valid(win.buf) then return end
       ticks[i] = api.nvim_buf_get_changedtick(win.buf)
       contents[i] = api.nvim_buf_get_lines(win.buf, 0, -1, false)
-      M.clear_tokens(win)
-      if win.applied and api.nvim_win_is_valid(win.id) and vim.wo[win.id].winhl == win.applied then
-        vim.wo[win.id].winhl = win.original
-      end
     end
     local main = layout:get_main_win().id
     local main_index
@@ -164,18 +174,7 @@ function M.attach(layout)
                 or api.nvim_win_get_buf(target.id) ~= target.buf then return end
             end
             for j, target in ipairs(state.windows) do
-              -- Map native inline emphasis to the line background, without changing diffopt.
-              local token_group = M.token_highlight(target.id)
-              target.original = vim.wo[target.id].winhl
-              local mappings = {}
-              local line_hl = target.original:match("DiffChange:([^,]+)") or "DiffChange"
-              for mapping in target.original:gmatch("[^,]+") do
-                if not mapping:match("^DiffText:") then mappings[#mappings + 1] = mapping end
-              end
-              mappings[#mappings + 1] = "DiffText:" .. line_hl
-              target.applied = table.concat(mappings, ",")
-              vim.wo[target.id].winhl = target.applied
-              M.highlight_tokens(target, all_ranges[j], token_group)
+              M.highlight_tokens(target, all_ranges[j], target.token_group)
             end
           end,
         })
