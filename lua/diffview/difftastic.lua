@@ -1,4 +1,5 @@
--- Difftastic refines inline emphasis; Neovim still owns line alignment.
+-- Difftastic supplies token highlights and anchors for readonly comparisons.
+local alignment = require("diffview.difftastic_alignment")
 local M = {}
 local api = vim.api
 
@@ -76,6 +77,7 @@ function M.detach(layout)
   if not state then return end
   layout.state.difftastic = nil
   state.generation = state.generation + 1
+  alignment.clear(state)
   if state.group then api.nvim_del_augroup_by_id(state.group) end
   for _, job in ipairs(state.jobs) do pcall(vim.fn.jobstop, job) end
   for _, win in ipairs(state.windows) do
@@ -96,13 +98,18 @@ function M.attach(layout)
     )
     return
   end
-  local state = { generation = 0, jobs = {}, windows = {} }
+  local RevType = require("diffview.vcs.rev").RevType
+  local state = {
+    generation = 0, jobs = {}, windows = {}, tabpage = api.nvim_get_current_tabpage(),
+    readonly = #layout.windows == 2,
+  }
   layout.state.difftastic = state
   for _, win in ipairs(layout.windows) do
     if not win:is_file_open() or win:is_nulled() then
       M.detach(layout)
       return
     end
+    state.readonly = state.readonly and win.file.rev.type == RevType.COMMIT
     state.windows[#state.windows + 1] = {
       id = win.id, buf = win.file.bufnr, path = win.file.path,
       original = vim.wo[win.id].winhl,
@@ -154,10 +161,10 @@ function M.attach(layout)
           on_exit = function(_, code)
             vim.fn.delete(dir, "rf")
             if layout.state.difftastic ~= state or generation ~= state.generation then return end
-            local ok, left, right = pcall(function()
+            local ok, left, right, result = pcall(function()
               assert(code == 0, "difft failed")
               local result = vim.fn.json_decode(table.concat(output, "\n"))
-              return M.ranges(result, "lhs"), M.ranges(result, "rhs")
+              return M.ranges(result, "lhs"), M.ranges(result, "rhs"), result
             end)
             if ok then
               vim.list_extend(all_ranges[i], left)
@@ -172,6 +179,9 @@ function M.attach(layout)
                 or api.nvim_buf_get_changedtick(target.buf) ~= ticks[j]
                 or not api.nvim_win_is_valid(target.id)
                 or api.nvim_win_get_buf(target.id) ~= target.buf then return end
+            end
+            if state.readonly then
+              alignment.apply(state, win, state.windows[main_index], result, contents[i], contents[main_index])
             end
             for j, target in ipairs(state.windows) do
               M.highlight_tokens(target, all_ranges[j], target.token_group)
