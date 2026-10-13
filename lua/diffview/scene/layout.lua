@@ -51,6 +51,7 @@ function Layout:get_main_win() oop.abstract_stub() end
 ---@diagnostic enable: unused-local, missing-return
 
 function Layout:destroy()
+  require("diffview.difftastic").detach(self)
   for _, win in ipairs(self.windows) do
     win:destroy()
   end
@@ -161,6 +162,7 @@ end
 
 ---@param self Layout
 Layout.open_files = async.void(function(self)
+  require("diffview.difftastic").detach(self)
   if #self:files() < #self.windows then
     self:open_null()
     self.emitter:emit("files_opened")
@@ -184,11 +186,13 @@ Layout.open_files = async.void(function(self)
     await(win:open_file())
   end
 
+  require("diffview.difftastic").attach(self)
   self:sync_scroll()
   self.emitter:emit("files_opened")
 end)
 
 function Layout:open_null()
+  require("diffview.difftastic").detach(self)
   for _, win in ipairs(self.windows) do
     win:open_null()
   end
@@ -272,6 +276,7 @@ function Layout:restore_winopts()
 end
 
 function Layout:detach_files()
+  require("diffview.difftastic").detach(self)
   for _, win in ipairs(self.windows) do
     win:detach_file()
   end

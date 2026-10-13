@@ -44,6 +44,9 @@ end
 
 ---@override
 function StandardView:close()
+  for _, layout in pairs(self.layouts) do
+    require("diffview.difftastic").detach(layout)
+  end
   self.panel:destroy()
   View.close(self)
 end

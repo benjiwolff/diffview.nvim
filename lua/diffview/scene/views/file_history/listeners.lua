@@ -19,6 +19,9 @@ return function(view)
       end
     end,
     tab_leave = function()
+      if view.cur_layout then
+        require("diffview.difftastic").detach(view.cur_layout)
+      end
       local file = view.panel.cur_item[2]
 
       if file then
