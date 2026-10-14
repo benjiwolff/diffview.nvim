@@ -56,11 +56,22 @@ end
 
 function M.ranges(result, side)
   local ranges = {}
+  local opposite = side == "lhs" and "rhs" or "lhs"
   assert(type(result) == "table" and type(result.status) == "string", "Invalid difftastic output")
   for _, chunk in ipairs(result.chunks or {}) do
+    local replacement = false
+    for _, line in ipairs(chunk) do
+      local value = line[opposite]
+      if value and value ~= vim.NIL then
+        for _, change in ipairs(value.changes or {}) do
+          if change["end"] > change.start then replacement = true end
+        end
+      end
+    end
+    -- Replacements can span unmatched lines; one-sided chunks use line highlights.
     for _, line in ipairs(chunk) do
       local value = line[side]
-      if value and value ~= vim.NIL then
+      if replacement and value and value ~= vim.NIL then
         for _, change in ipairs(value.changes or {}) do
           if change["end"] > change.start then
             ranges[#ranges + 1] = { value.line_number, change.start, change["end"] }
