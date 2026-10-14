@@ -68,10 +68,13 @@ function M.ranges(result, side)
         end
       end
     end
-    -- Replacements can span unmatched lines; one-sided chunks use line highlights.
+    -- Replacements can span unmatched lines. Paired lines can also contain
+    -- token-only additions/deletions; only wholly one-sided lines skip tokens.
     for _, line in ipairs(chunk) do
       local value = line[side]
-      if replacement and value and value ~= vim.NIL then
+      local other = line[opposite]
+      local paired = other and other ~= vim.NIL
+      if (replacement or paired) and value and value ~= vim.NIL then
         for _, change in ipairs(value.changes or {}) do
           if change["end"] > change.start then
             ranges[#ranges + 1] = { value.line_number, change.start, change["end"] }
