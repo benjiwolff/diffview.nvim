@@ -129,8 +129,7 @@ function M.attach(layout)
       original = vim.wo[win.id].winhl,
     }
   end
-  -- Suppress native words before starting the asynchronous comparison, and keep
-  -- that suppression throughout refreshes.
+  -- Prepare suppression, but keep native words until usable token ranges arrive.
   for _, target in ipairs(state.windows) do
     target.token_group = M.token_highlight(target.id)
     local mappings = {}
@@ -140,7 +139,15 @@ function M.attach(layout)
     end
     mappings[#mappings + 1] = "DiffText:" .. line_hl
     target.applied = table.concat(mappings, ",")
-    vim.wo[target.id].winhl = target.applied
+  end
+  local function fallback()
+    alignment.clear(state)
+    for _, target in ipairs(state.windows) do
+      M.clear_tokens(target)
+      if api.nvim_win_is_valid(target.id) and vim.wo[target.id].winhl == target.applied then
+        vim.wo[target.id].winhl = target.original
+      end
+    end
   end
   local function refresh()
     state.generation = state.generation + 1
@@ -182,6 +189,11 @@ function M.attach(layout)
             local ok, left, right, result = pcall(function()
               assert(code == 0, "difft failed")
               local result = vim.fn.json_decode(table.concat(output, "\n"))
+              assert(type(result.language) == "string", "Missing difftastic language")
+              -- Text JSON includes unchanged words as changes. Empty ranges are
+              -- valid for syntax diffs, so use the reported mode instead.
+              assert(result.language ~= "Text" and not result.language:match("^Text %("),
+                "Difftastic used text fallback")
               return M.ranges(result, "lhs"), M.ranges(result, "rhs"), result
             end)
             if ok then
@@ -189,6 +201,7 @@ function M.attach(layout)
               vim.list_extend(all_ranges[main_index], right)
             else
               failed = true
+              fallback()
             end
             pending = pending - 1
             if pending ~= 0 or failed then return end
@@ -202,6 +215,9 @@ function M.attach(layout)
               alignment.apply(state, win, state.windows[main_index], result, contents[i], contents[main_index])
             end
             for j, target in ipairs(state.windows) do
+              if vim.wo[target.id].winhl == target.original then
+                vim.wo[target.id].winhl = target.applied
+              end
               M.highlight_tokens(target, all_ranges[j], target.token_group)
             end
           end,
@@ -209,6 +225,7 @@ function M.attach(layout)
         if job <= 0 then
           vim.fn.delete(dir, "rf")
           failed = true
+          fallback()
         else
           state.jobs[#state.jobs + 1] = job
         end
